@@ -8,6 +8,7 @@
 - interest rate on 10-year TIPS
 - operating margins for the S&P500
 - composition of earnings by "industry"
+## sp500_pe/ contains the two "main" scripts
 ### update_data.py
 - reads new data from .xlsx workbooks in input_dir
 - S&P data downloaded from S&P's weekly posts
