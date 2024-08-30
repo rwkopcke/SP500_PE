@@ -21,6 +21,21 @@ def my_df_print(df):
     ):
         print(df)
         
+        
+def dt_str_to_date(item):
+    '''
+        input either str or datetime obj
+        return datetime object
+        cast to datetime.date() in rd.data_block_reader()
+    '''
+    if isinstance(item, str):
+        # fetch just the date component of str
+        dt = item.split(" ")[0]
+        dt = datetime.strptime(dt,'%m/%d/%Y')
+    else:
+        dt = item
+    return dt
+        
 
 def string_to_date(series):
     '''
@@ -64,121 +79,86 @@ def yrqtr_to_yr(series):
     '''
     return pl.Series([yq[:4]
                       for yq in series])
-
-
-def read_wksht(file_addr, wksht_name, first_col, date_key=None):
-    """_summary_
-    This helper function returns the worksheet and date
-    for the worksheet name in the workbook 
-    specified by the file address
     
-    Args:
-        file_addr (_type_): _description_
-        wksht_name (_type_): _description_
-        date_key (_type_): _description_
+    
+#======================================================================
 
-    Returns:
-        list
-        _type_: _description_
+
+def find_wksht(file_addr, wksht_name):
+    """
+    This helper function returns the worksheet
+    for the file specified by the file address
     """
 
     wkbk = load_workbook(filename=file_addr,
                          read_only=True,
                          data_only=True)
     wksht = wkbk[wksht_name]
-    max_to_read = wksht.max_row
+    return wksht
+
+
+def find_key_row(wksht, search_col, start_row, key_values= None):
+
+    # find cell containing the specified key,
+    # return row number of the cell
+    #   crawl down col A; return address of the first match
     
-    # find cell with the date of the wkbk, fetch its value
-    # crawl down col A; find first datetime entry
-    if date_key is not None:
-        d_row = 1
-        date = wksht['A1'].value
-        while (not isinstance(date, datetime) and
-              (d_row < max_to_read)):
-            d_row += 1
-            date = wksht[f'{first_col}{d_row}'].value
-        if d_row == max_to_read:
-            return [wksht, None]
-        name_date = \
-            f'{date.month:02}-{date.day:02}-{date.year:04}'
-    else:
-        name_date = None
-                                                                          
-    return [wksht, name_date]
+    # cap the number of rows to read
+    max_to_read = 500
+    
+    row_number = start_row
+    while row_number < max_to_read:
+        item = wksht[f'{search_col}{row_number}'].value
+        for key in key_values:
+            if item_matches_key(item, key):
+                 return row_number
+        row_number += 1                                                     
+    return 0
 
 
-def find_key_loc(start, stop, wksht, key_wrds, col=None, row=None):
+def item_matches_key(item, key):
+    # all keys are either None or str
+    if (key is None):
+        return item is None
+    if (isinstance(item, str)):
+        return item == key
+    return False
+
+
+def find_key_col(wksht, search_row, start_col, key_value= None):
+    
+    # find cell containing the specified key,
+    # return col letter of the cell
+    #   crawl along search_row; return address of the first match
+    
+    # cap the number of rows to read
+    max_to_read = 100
+    
+    col_numb = start_col
+    while col_numb < max_to_read:
+        # convert col number to letter
+        col_ltr = openpyxl.utils.cell.get_column_letter(col_numb)
+        item = wksht[f'{col_ltr}{search_row}'].value
+        if item_matches_key(item, key_value):
+            break
+        col_numb += 1
+    if col_numb == max_to_read:
+        return 0                                                              
+    return col_numb
+
+
+def data_from_sheet(wksht, start_col, stop_col,
+                    skip_col, start_row, stop_row):
     """
-    Set key and col to search a col down its rows for a string 
-    that matches key.
-    Set row, not col, to search a row along its cols for None
-
-    Args:
-        start (_type_): _description_
-        stop (_type_): _description_
-        key (_type_): _description_
-    """
-    # helper function for returning step
-    def return_step(item, key_wrds):
-        if any(k is None for k in key_wrds):
-            if ((item is None) or 
-                (item in key_wrds)):
-                return True
-        elif ((item is not None) and 
-              (item in key_wrds)):
-            return True
-        else:
-            return False
-        
-    if (((col is not None) and (row is not None)) or
-       ((col is None) and (row is None))):
-        print('In find_key_loc():')
-        print('One and only one of row, col must be None')
-        print(start, stop, wksht, key_wrds, col, row)
-        sys.exit()
-    
-    # scan rows
-    if col is not None:
-        for step in range(start, stop):
-            item = wksht[f'{col}{step}'].value
-            if isinstance(item, str):
-                item = "".join(list(item.split()))
-            if return_step(item, key_wrds):
-                return step
-    # scan cols
-    elif row is not None:
-        for step in range(start, stop):
-            col = openpyxl.utils.cell.get_column_letter(step)
-            item = wksht[f'{col}{row}'].value
-            if return_step(item, key_wrds):
-                return step
-            
-    print('In find_key_loc():')                
-    print(f'key {key_wrds} not found')
-    print(start, stop, wksht, key_wrds, col, row)
-    sys.exit()
-
-
-def data_from_sheet(wksht, start_col, stop_col, skip_cols,
-                    start, stop):
-    """_summary_
-    
     This helper function fetches the block of data specified
     by first_col, start (row) and last_col, stop (row)
     in the specified worksheet
-
-    Args:
-        first_col (_type_): _description_
-        last_col (_type_): _description_
-        start (_type_): _description_
-        stop (_type_): _description_
     """
     # rng references the block of data
-    # the comprehense fetches the data over cols for each row
-    rng = wksht[f'{start_col}{start}:{stop_col}{stop}']
+    # the comprehension fetches the data over cols for each row
+    rng = wksht[f'{start_col}{start_row}:{stop_col}{stop_row}']
     data = [[col_cell.value 
-            for ind, col_cell in enumerate(row)
-            if ind not in skip_cols]
+                for ind, col_cell in enumerate(row)
+                if ind not in skip_col]
             for row in rng]
-    
     return data

@@ -12,61 +12,120 @@ from datetime import datetime
 import polars.selectors as cs
 import openpyxl.utils.cell
 import sp500_pe.helper_func as hp
+import sys
 
-def data_reader(key_wrds, stop_wrds, file_addr, 
-                wksht_name, first_col, last_col, 
-                empty_cols=[], date_key=None, 
-                column_names=None):
-    """_summary_
+
+def read_sp_date(file_addr, wksht_name,
+                 date_keys, value_col_1, 
+                 date_key_2, value_col_2,
+                 column_names, include_prices= False):
     
+    if date_keys is None:
+        print('\n============================================')
+        print(f'Date keys are {date_keys} for {wksht_name}')
+        print(f'at:  {file_addr}')
+        print('============================================\n')
+        sys.exit()
+    
+    # load wksht from wkbk
+    wksht = hp.find_wksht(file_addr, wksht_name)
+    
+    # fetch row for latest date and price
+
+    key_row = hp.find_key_row(wksht, 'A', 1, date_keys)
+
+    if (key_row == 0):
+        print('\n============================================')
+        print(f'Found no {date_keys} in {wksht_name}')
+        print(f'at:  {file_addr}')
+        print('============================================\n')
+        sys.exit()
+        
+    name_date = hp.dt_str_to_date(
+        wksht[f'{value_col_1}{key_row}'].value)
+    
+    if not include_prices:
+        return [name_date, None]
+        
+    date_lst = []
+    price_lst = []
+    
+    date_lst.append(name_date)
+    name_date = name_date.date()  # value to return should be date()
+    price_lst.append(wksht[f'{value_col_1}{key_row + 1}'].value)
+    
+    # fetch next date and price
+    key_row = hp.find_key_row(wksht, 'A', key_row, date_key_2)
+    
+    if (key_row == 0):
+        print('\n============================================')
+        print(f'Found no {date_key_2} in {wksht_name}')
+        print(f'at:  {file_addr}')
+        print('============================================\n')
+        sys.exit()
+    
+    date_lst.append(hp.dt_str_to_date(
+        wksht[f'A{key_row - 2}'].value))
+    price_lst.append(wksht[f'{value_col_2}{key_row -2}'].value)
+    
+    df = pl.DataFrame({
+                column_names[0]: date_lst,
+                column_names[1]: price_lst},
+                schema= {column_names[0]: pl.Date, 
+                            column_names[1]: pl.Float32})
+    return [name_date, df]     
+    
+
+def read_sp_sheet(file_addr, wksht_name,
+                  act_key, first_blk_col, last_blk_col,
+                  skip_col, column_names):
+    
+    # load wksht from wkbk
+    wksht = hp.find_wksht(file_addr, wksht_name)
+    # fetch historical earnings data from wksht
+    key_row = hp.find_key_row(wksht, 'A', 1, act_key)
+    
+    df = data_block_reader(wksht, key_row,
+                           first_blk_col, last_blk_col,
+                           skip_col, column_names)
+    return df
+
+
+def data_block_reader(wksht, key_row,
+                      first_blk_col, last_blk_col,
+                      skip_col, column_names):
+    """
     This function uses read_wksht() and data_from_sheet()
     to return the block of data in a worksheet as a dataframe
+    the first column is type datetime.date
 
-    Args:
-        key_wrd (_type_): _description_
-        file_addr (_type_): _description_
-        wksht_name (_type_): _description_
-        empty_cols (_type_): _description_
-        first_col (_type_): _description_
-        last_col (_type_): _description_
-        date_cell (_type_): _description_
-        column_names (_type_): _description_
-
-    Returns:
-        _type_: _description_
     """
     
-    wksht, name_date = hp.read_wksht(file_addr, wksht_name,
-                                     first_col, date_key)
-    max_to_read = wksht.max_row
-    
     # first data row to read. Follows key_wrd row.
-    start = 1 + hp.find_key_loc(1, max_to_read, wksht, key_wrds, first_col)
-    # last data row to read. For rows, no key or row values.
-    stop = -1 + hp.find_key_loc(start, max_to_read, wksht, 
-                             stop_wrds, first_col)
+    start_row = 1 + key_row
+    # last data row to read. 
+    stop_row = -1 + hp.find_key_row(wksht, 'A', 
+                                    start_row, 
+                                    [ None, 'Actuals'])
     
     # read a list of lists (rows)
-    data = hp.data_from_sheet(wksht, first_col, last_col, empty_cols,
-                           start, stop)
-    # iterate over rows to convert all dates to datetime
+    data = hp.data_from_sheet(wksht, first_blk_col, last_blk_col,
+                              skip_col, start_row, stop_row)
+    # iterate over rows to convert all dates to datetime.date
     # row[0]: datetime or str, '%m/%d/%Y' is first 'word' in str
     for row in data:
-        if isinstance(row[0], str):
-            row[0] = row[0].split(" ")[0]
-            row[0] = datetime.strptime(row[0], '%m/%d/%Y')
+        row[0] = hp.dt_str_to_date(row[0])
     
-    data_df = pl.DataFrame(data, schema=column_names, orient="row")\
+    df = pl.DataFrame(data, schema=column_names, orient="row")\
                 .cast({cs.float(): pl.Float32,
-                       pl.Datetime: pl.Date})\
-                .with_columns(pl.col('date')
-                                .map_batches(hp.date_to_year_qtr)
-                                .alias('year_qtr'))
-    return [data_df, name_date]
+                       pl.Datetime: pl.Date})
+    
+    return df
 
 
-def margin_reader(key_wrds, file_addr, wksht_name,
-                  first_col):
+def margin_reader(file_addr, wksht_name,
+                  marg_key, first_blk_col, stop_col_key,
+                  yr_qtr_name):
     """read the operating margin data for S&P 500 by year.
        one df for each date of projections
 
@@ -75,67 +134,71 @@ def margin_reader(key_wrds, file_addr, wksht_name,
         name_date : date of projection
     """
     
-    wksht, _ = hp.read_wksht(file_addr, wksht_name, first_col)
-    max_to_read = wksht.max_row
+    wksht = hp.find_wksht(file_addr, wksht_name)
     
     # find the rows with margin data
-    start = 1 + hp.find_key_loc(3, max_to_read, wksht, 
-                             key_wrds, col=first_col)
-    stop = start + 3
+    start_row = hp.find_key_row(wksht, 'A', 1, marg_key)
+    stop_row = start_row + 4
     
     # The label for the first col, which contains the qtr labels
-    # is 'qtr'.  The other cols are named by year
-    col_label = ["qtr"]
-    max_to_read = 100
-    l_col = -1 + hp.find_key_loc(2, max_to_read, wksht,
-                              [None], row=start-1)
-    stop_col = col = openpyxl.utils.cell.get_column_letter(l_col)
-    
-    for step in range(2,l_col+1):
-        col = openpyxl.utils.cell.get_column_letter(step)
-        yr = str(wksht[f'{col}{start - 1}'].value)
-        yr = "".join([ch for ch in yr if ch.isdigit()])
+    # is 'QTR'.  The other cols are named by year
+    last_blk_col = -1 + hp.find_key_col(wksht, start_row, 
+                                        2, stop_col_key)
+    # block to collect: A,start_row  to  stop_col, start_row+4
+    # collect data plus col headings for the block
+    col_label = []
+    for col_idx in range(1,last_blk_col):
+        col = openpyxl.utils.cell.get_column_letter(col_idx)
+        yr = str(wksht[f'{col}{start_row}'].value)
         col_label.append(yr)
+    stop_blk_col =  openpyxl.utils.cell\
+        .get_column_letter(last_blk_col)
     
-    data = hp.data_from_sheet(wksht, first_col, stop_col, [],
-                           start, stop)
+    # list of lists for each row
+    data = hp.data_from_sheet(wksht, first_blk_col, stop_blk_col, [],
+                              start_row, stop_row)
     
-     # clean the entries in the 'qtr' col of the df
-    for idx, row in enumerate(data):
-        row[0] = f'Q{4-idx}'
+    data_values = [
+        [v for v in row]
+        for row in data[1:] ]
     
+    col_names = [str(item).split('*')[0] for item in data[0]]
+   
     # build "tall" 2-col DF with 'year_qtr' and 'margin'
-    data_df = pl.DataFrame(data, schema=col_label, orient="row")\
+    df = pl.DataFrame(data_values, schema=col_names,
+                      orient= 'row')\
+                .with_columns(pl.col('QTR')
+                              .map_elements(lambda x: x.split(' ')[0],
+                                            return_dtype= str))\
                 .cast({cs.float(): pl.Float32})\
-                .unpivot(index= 'qtr', variable_name='year')
-    data_df = data_df.with_columns(
-                        pl.struct(['qtr', 'year'])\
-                        .map_elements(lambda x: 
-                                        f"{x['year']}-{x['qtr']}",
-                                        return_dtype= pl.String)\
-                        .alias("year_qtr"))\
-                     .drop(['year', 'qtr'])\
-                     .sort(['year_qtr'])
-    return data_df
+                .unpivot(index= 'QTR', variable_name='year')
+    df = df.with_columns(
+                pl.struct(['QTR', 'year'])\
+                    .map_elements(lambda x: 
+                                  f"{x['year']}-{x['QTR']}",
+                                  return_dtype= pl.String)\
+                        .alias(yr_qtr_name))\
+                    .drop(['year', 'QTR'])
+    return df
 
 
-def  fred_reader(file_addr, name):
+def fred_reader(file_addr, rr_col_name, yr_qtr_name):
     wkbk = load_workbook(filename=file_addr,
                          read_only=True,
                          data_only=True)
     wksht = wkbk.active
-    min_row = 12
-    max_row = wksht.max_row
+    first_row = 12
+    last_row = wksht.max_row
     
     data = hp.data_from_sheet(wksht, "A", "B", [],
-                    min_row, max_row)
+                    first_row, last_row)
     
-    df = pl.DataFrame(data, schema=['date', name],
+    df = pl.DataFrame(data, schema=['date', rr_col_name],
                       orient='row')\
+           .with_columns(pl.col('date')
+                        .map_batches(hp.date_to_year_qtr)
+                        .alias(yr_qtr_name))\
            .cast({pl.Datetime: pl.Date,
                   cs.float(): pl.Float32})\
-           .with_columns(pl.col('date')
-                            .map_batches(hp.date_to_year_qtr)
-                            .alias('year_qtr'))\
            .drop('date')
     return df

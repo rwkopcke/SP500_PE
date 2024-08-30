@@ -1,3 +1,21 @@
+'''This program reads selected data from S&P, sp-500-eps-est.xlsx
+   and from the 10-year TIPS rate from FRED: 
+        https://fred.stlouisfed.org/series/DFII10
+   It then writes these data as polars dataframes to .parquet files
+        and writes a record of the files that it has read and writen
+        in the form of a dictionary to to a .json file
+   The polars dataframes contain the latest projections of earnings for the
+   S&P500 within each quarter since late 2017. A polars dataframe contains
+   the actual earnings and the value of the index for each quarter beginning
+   in 1988. This dataframe also contains actual values for operating
+   margins, revenues, book values, dividends, and other actual data
+   reported by S&P, plus actual values for the 10-year TIPS.
+   
+   The addresses of documents for this project appear in this program's 
+   project directory: S&P500_PE/sp500_pe/__init__.py
+'''
+
+
 import sp500_pe as sp
 import sp500_pe.helper_func as hp
 import sp500_pe.read_data_func as rd
@@ -8,30 +26,70 @@ import polars as pl
 
 #######################  Parameters  ##################################
 
-# input ids for Excel wkbks
-column_names = ['date', 'price', 'op_eps', 'rep_eps',
+# data from "ESTIMATES&PEs" wksht
+RR_COL_NAME = 'real_int_rate'
+YR_QTR_NAME = 'yr_qtr'
+PREFIX_OUTPUT_FILE_NAME = 'sp-500-eps-est'
+EXT_OUTPUT_FILE_NAME = '.parquet'
+
+SHT_0_NAME = "ESTIMATES&PEs"
+COLUMN_NAMES = ['date', 'price', 'op_eps', 'rep_eps',
                 'op_p/e', 'rep_p/e', '12m_op_eps', '12m_rep_eps']
-columns_qtrly = ['date', 'div_ps', 'sales_ps',
-                 'bk_val_ps', 'capex_ps', 'price', 'divisor']
+PROJ_COLUMN_NAMES = ['date', 'op_eps', 'rep_eps',
+                     'op_p/e', 'rep_p/e', '12m_op_eps', '12m_rep_eps']
 
-wksht_name = 'ESTIMATES&PEs'
-actual_key = 'ACTUALS'
-actual_key2 = 'Actuals'
-proj_key = 'ESTIMATES'
-margin_key = 'QTR'
+SHT_1_NAME = "QUARTERLY DATA"
+COLUMN_NAMES_QTR = ['date', 'div_ps', 'sales_ps',
+                    'bk_val_ps', 'capex_ps', 'divisor']
 
-rr_col_name = 'real_int_rate'
-sp_col_name = 'sp_price'
+SHT_0_DATE_PARAMS = {
+    'date_keys' : ['Date', 'Data as of the close of:'],
+    'value_col_1' : 'D',
+    'date_key_2' : ['ACTUALS'],
+    'value_col_2' : 'B',
+    'column_names' : COLUMN_NAMES,
+    'include_prices' : True
+}
 
-qtrly_wksht_name = 'QUARTERLY DATA'
-qtrly_key = 'END'
-last_col_qtrly = 'I'
+SHT_0_PARAMS = {
+    'act_key' : ['ACTUALS', 'Actuals'],
+    'first_blk_col' : 'A',
+    'last_blk_col' : 'J',
+    'skip_col' : [4, 7],
+    'column_names' : COLUMN_NAMES
+}
 
-empty_cols = [4, 7]
-empty_cols_qtr = [2, 3]
-max_to_read = 1000
-first_col = 'A'
-last_col ='J'
+SHT_M_PARAMS = {
+    'marg_key': ['QTR'],
+    'first_blk_col': 'A',
+    'stop_col_key': None,
+    'yr_qtr_name': YR_QTR_NAME
+}
+
+SHT_1_PARAMS = {
+    'act_key' : ['END'],
+    'first_blk_col' : 'A',
+    'last_blk_col' : 'I',
+    'skip_col' : [2, 3, 7],
+    'column_names' : COLUMN_NAMES_QTR
+}
+
+SHT_0_PROJ_DATE_PARAMS = {
+    'date_keys' : ['Date', 'Data as of the close of:'],
+    'value_col_1' : 'D', 
+    'date_key_2' : None, 
+    'value_col_2' : None,
+    'column_names' : None,
+    'include_prices' : False
+}
+
+SHT_0_PROJ_PARAMS = {
+    'act_key' : ['ESTIMATES'],
+    'first_blk_col' : 'A',
+    'last_blk_col' : 'J',
+    'skip_col' : [1, 4, 7],
+    'column_names' : PROJ_COLUMN_NAMES
+}
 
 
 #######################  MAIN Function  ###############################
@@ -88,12 +146,13 @@ def update_data_files():
         print('All files have been read previously')
         print('============================================\n')
         sys.exit()
-    # if new data, add new files to historical record
-    else:
-        record_dict['prev_files'].extend(
-            list(new_files_set)
-        )
-        record_dict['prev_files'].sort(reverse= True)
+        
+# there is new data, add new files to historical record
+    record_dict['prev_files'].extend(
+        list(new_files_set)
+    )
+    # most recent appear first
+    record_dict['prev_files'].sort(reverse= True)
 
 # find the latest new file for each quarter
     data_df = pl.DataFrame(list(new_files_set), 
@@ -106,8 +165,7 @@ def update_data_files():
                             .map_batches(hp.date_to_year_qtr)
                             .alias('year_qtr'))\
                 .group_by('year_qtr')\
-                            .agg([pl.all().sort_by('date')
-                                          .last()])\
+                .agg([pl.all().sort_by('date').last()])\
                 .sort(by= 'year_qtr') 
     
     files_to_archive = list(new_files_set)
@@ -129,7 +187,7 @@ def update_data_files():
                             .alias('year_qtr'))
                 
     # update used_files, a join with new files
-        # 1st filter removes yeat_qtr rows that have no dates in data_df
+        # 1st filter removes yr_qtr rows that have no dates in data_df
         # pl.when marks rows that have data only from data_df or have
         #       more recent data from data_df
         # 2nd filter keeps only the rows with new data
@@ -151,29 +209,31 @@ def update_data_files():
                          .rename({'date_right': 'date'})\
                          .sort(by= 'year_qtr')
                          
-        # remove old files from two places in record_dict lists
-        #    prev_used (input file used) output_proj_files
-        # remove the output .parquet file from dir
+        # remove old files from record_dict lists
+        #   prev_used_files (.xlsx) & output_proj_files (.parquet)
+        # remove the output .parquet file from output_proj_dir
         files_to_remove_list = \
             pl.Series(used_df.filter(pl.col('proj_to_delete')
                                     .is_not_null())\
                             .select(pl.col('proj_to_delete')))\
                             .to_list()
-        
+                            
         for file in files_to_remove_list:
             record_dict['prev_used_files'].remove(file)
-            proj_file = file.split('.')[0] + ".parquet"
+            file_list = file.split(" ", 1)
+            proj_file = \
+                f'{file_list[0]} {file_list[1]
+                                    .replace(' ', '-')
+                                    .replace('.xlsx', '.parquet')}'
             record_dict['output_proj_files'].remove(proj_file)
-            # using Path() objects
+            # using Path() object
             address_proj_file = sp.OUTPUT_PROJ_DIR / proj_file
             if address_proj_file.exists():
-                print(address_proj_file)
                 address_proj_file.unlink()
                 print('\n============================================')
                 print(f'Removed {proj_file} from: \n{sp.OUTPUT_PROJ_DIR}')
                 print(f'Found file with more recent date for the quarter')
                 print('============================================\n')
-            
             else:
                 print('\n============================================')
                 print(f"WARNING")
@@ -205,29 +265,28 @@ def update_data_files():
                 hp.string_to_date(record_dict['prev_used_files'])
             ).to_list()
     # most recent is first
-    latest_file = record_dict['prev_used_files'][0]
-    record_dict["latest_used_file"] = latest_file
+    record_dict["latest_used_file"] = record_dict['prev_used_files'][0]
                      
-
 # +++++  fetch the latest data  +++++++++++++++++++++++++++++++++++++++
     print('\n================================================')
-    print(f'Updating historical data from: {latest_file}')
+    print(f'Updating historical data from: {record_dict["latest_used_file"]}')
     print(f'in directory: \n{sp.INPUT_DIR}')
     print('================================================\n')
-        
+    
     # address of the most recent file
-    latest_file_addr = sp.INPUT_DIR / latest_file
+    latest_file_addr = sp.INPUT_DIR / record_dict["latest_used_file"]
+    
+    # most recent date and prices
+    name_date, actual_df = \
+        rd.read_sp_date(latest_file_addr,
+                        SHT_0_NAME, **SHT_0_DATE_PARAMS)
+    
     # load historical data, if updates are available
-    actual_df, name_date = rd.data_reader([actual_key], [None],
-                                           latest_file_addr, 
-                                           wksht_name, first_col, 
-                                           last_col, 
-                                           empty_cols=empty_cols,
-                                           date_key='A', 
-                                           column_names=column_names)
-    #hp.my_df_print(actual_df)
+    df = rd.read_sp_sheet(latest_file_addr,
+                          SHT_0_NAME,
+                          **SHT_0_PARAMS)
 
-    # if any date is None, abort
+    # if any date is None, halt
     if (name_date is None or
         any([item is None
             for item in actual_df['date']])):
@@ -238,53 +297,50 @@ def update_data_files():
         print(actual_df['date'])
         print('============================================\n')
         sys.exit()
-            
+        
+    actual_df = pl.concat([actual_df, df], how= "diagonal")\
+                  .with_columns(pl.col('date')
+                        .map_batches(hp.date_to_year_qtr)
+                        .alias(YR_QTR_NAME))
+    del df
+        
 # margins
-    margins_df = rd.margin_reader([margin_key], latest_file_addr, 
-                                   wksht_name, first_col)
+    margins_df = rd.margin_reader(latest_file_addr,
+                                  SHT_0_NAME, **SHT_M_PARAMS)
     margins_df = margins_df.rename({'value': 'op_margin'})
-    #hp.my_df_print(margins_df)
-    
     
     # merge margins with previous data
     actual_df = actual_df.join( 
             margins_df, 
             how="left", 
-            on=["year_qtr"],
-            coalesce= True
-        )
+            on= YR_QTR_NAME,
+            coalesce= True)
     del margins_df
         
 # real interest rates, eoq, from FRED DFII10
     real_rt_df = rd.fred_reader(sp.INPUT_RR_ADDR,
-                                rr_col_name)
-    #hp.my_df_print(real_rt_df)
+                                RR_COL_NAME, YR_QTR_NAME)
     
     # merge real_rates with sp500_pe_dict['history']['actuals']
     actual_df = actual_df.join( 
             real_rt_df, 
             how="left", 
-            on=["year_qtr"],
-            coalesce= True
-    )
+            on=[YR_QTR_NAME],
+            coalesce= True)
     del real_rt_df
     
 # qtrly_data
-    qtrly_df, _ = rd.data_reader([qtrly_key], [None],
-                                latest_file_addr, 
-                                qtrly_wksht_name, 
-                                first_col, last_col_qtrly,
-                                empty_cols=empty_cols_qtr, 
-                                column_names=columns_qtrly)
-    #hp.my_df_print(qtrly_df)
+    qtrly_df = rd.read_sp_sheet(latest_file_addr,
+                                SHT_1_NAME, **SHT_1_PARAMS)\
+                 .with_columns(pl.col('date')
+                            .map_batches(hp.date_to_year_qtr)
+                            .alias(YR_QTR_NAME))
     
     # merge qtrly with sp500_pe_dict['history']['actuals']
-    actual_df = actual_df.join( 
-            qtrly_df.select(pl.exclude(['date', 'price'])), 
-            how="left", 
-            on=["year_qtr"],
-            coalesce= True
-        )
+    actual_df = actual_df.join(qtrly_df,  
+                               how= "left", 
+                               on= [YR_QTR_NAME],
+                               coalesce= True)
     del qtrly_df
     
 # +++++ update history file +++++++++++++++++++++++++++++++++++++++++++
@@ -310,6 +366,8 @@ def update_data_files():
     print('============================================\n')
     
     del actual_df
+    
+
  
 # +++++ update projection files +++++++++++++++++++++++++++++++++++++++
 # ordinarily a very short list
@@ -321,19 +379,23 @@ def update_data_files():
         print(f'\n input file: {file}')    
         
 # projections of earnings
-        proj_df, name_date = rd.data_reader([proj_key], 
-                                         [None, actual_key, 
-                                         actual_key2],
-                                         input_address, 
-                                         wksht_name, first_col, 
-                                         last_col, 
-                                         empty_cols=empty_cols,
-                                         date_key='A',
-                                         column_names=column_names)
-        #proj_df = proj_df.drop('price')
-        
-        # if date is None, abort, and continue to the next file
-        if name_date is None :
+        # read date of projection, no prices or other data
+        name_date, _ = \
+            rd.read_sp_date(input_address,
+                            SHT_0_NAME, **SHT_0_PROJ_DATE_PARAMS)
+        name_date = name_date.date()
+    
+        # load projections for the date
+        proj_df = rd.read_sp_sheet(input_address,
+                                   SHT_0_NAME, **SHT_0_PROJ_PARAMS)\
+                    .with_columns(pl.col('date')
+                        .map_batches(hp.date_to_year_qtr)
+                        .alias(YR_QTR_NAME))
+
+        # if any date is None, abort
+        if (name_date is None or
+            any([item is None
+                for item in proj_df['date']])):
             print('\n============================================')
             print('In main(), projections:')
             print(f'Skipped sp-500 {name_date} missing projection date')
@@ -342,7 +404,8 @@ def update_data_files():
             continue
         
         # if name_date is not None, write the df to file
-        output_file_name = file.split(".")[0] + ".parquet"
+        output_file_name = \
+            f'{PREFIX_OUTPUT_FILE_NAME} {name_date}{EXT_OUTPUT_FILE_NAME}'
         record_dict['output_proj_files'].append(output_file_name)
         output_file_address = sp.OUTPUT_PROJ_DIR / output_file_name
         print(f'output file: {output_file_name}')
@@ -352,20 +415,19 @@ def update_data_files():
     # +++++ update archive ++++++++++++++++++++++++++++++++++++++++
     # archive all input files -- uses Path() variables
     # https://sysadminsage.com/python-move-file-to-another-directory/
+    print('\n============================================')
     for file in files_to_archive:
         input_address = sp.INPUT_DIR / file
         if input_address.exists():
             input_address.rename(sp.ARCHIVE_DIR / file)
-            print('\n============================================')
-            print(f"Archived: \n{input_address}")
-            print('============================================\n')
-        else:
-            print('\n============================================')
-            print(f"WARNING")
-            print(f"Tried to archive: \n{input_address}")
-            print(f'Address does not exist')
-            print('============================================\n')
+            print(f"Archived: {input_address}")
             
+        else:
+            print(f"\nWARNING")
+            print(f"Tried: {input_address}")
+            print(f'Address does not exist\n')
+    print('============================================\n')
+        
     sp.INPUT_RR_ADDR.rename(sp.ARCHIVE_DIR / sp.INPUT_RR_FILE)
     print('\n============================================')
     print(f"Archived: \n{sp.INPUT_RR_FILE}")

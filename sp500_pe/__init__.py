@@ -42,7 +42,6 @@ ARCHIVE_DIR = \
    Path('/Users/richardkopcke/Dropbox/Stock Analysis/sp_data_archive')
 #INPUT_DIR = ARCHIVE_DIR
 #INPUT_RR_ADDR = ARCHIVE_DIR / INPUT_RR_FILE
-# #INPUT_SPRICE_FILE = INPUT_DIR / 'SP500.xlsx'
 
 OUTPUT_DIR = BASE_DIR / "output_dir"
 OUTPUT_HIST_FILE = 'sp500_pe_df_actuals.parquet'

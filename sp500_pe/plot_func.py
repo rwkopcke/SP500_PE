@@ -257,7 +257,7 @@ def plots_page3(ax, df,
 
 
 def yq_and_ticklabels(df):
-    yr_qtr = pl.Series(df['year_qtr']).to_list()
+    yr_qtr = pl.Series(df['yr_qtr']).to_list()
     
     x_tick_labels = \
         [item if item[-1:] == '1' else item[-2:]
