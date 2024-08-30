@@ -1,6 +1,6 @@
 # S&P500 index and earnings
 #### initiated:  2023 08
-#### current version:  2024 08 01
+#### current version:  2024 08 30
 ### Uses current and historical data
 - index of stock prices for the S&P500
 - operating and reported earnings for the S&P500
