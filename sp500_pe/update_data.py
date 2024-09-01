@@ -15,14 +15,15 @@
    project directory: S&P500_PE/sp500_pe/__init__.py
 '''
 
+import sys
+import gc
+
+import polars as pl
+import json
 
 import sp500_pe as sp
 import sp500_pe.helper_func as hp
 import sp500_pe.read_data_func as rd
-
-import json
-import sys
-import polars as pl
 
 #######################  Parameters  ##################################
 
@@ -170,6 +171,7 @@ def update_data_files():
     
     files_to_archive = list(new_files_set)
     del new_files_set
+    gc.collect()
 
 # combine with prev_files where new_files has larger date for year_qtr
 # (new files can update and replace prev files for same year_qtr)
@@ -188,22 +190,17 @@ def update_data_files():
                 
     # update used_files, a join with new files
         # 1st filter removes yr_qtr rows that have no dates in data_df
-        # pl.when marks rows that have data only from data_df or have
-        #       more recent data from data_df
         # 2nd filter keeps only the rows with new data
+    # after renaming, ensures that 'date' ref only files with new data
+    # and proj_to_delete ref only files that are null or are superceded
         used_df = used_df.join(data_df,
                                on= 'year_qtr',
                                how= 'full',
                                coalesce= True)\
                          .filter(pl.col('date_right').is_not_null())\
-                         .with_columns(
-                             pl.when((pl.col('date').is_null()) | 
-                                     (pl.col('date') <
-                                      pl.col('date_right')))
-                               .then(1)
-                               .otherwise(0)
-                               .alias('new_data'))\
-                         .filter(pl.col('new_data') == 1)\
+                         .filter(((pl.col('date').is_null()) | 
+                                  (pl.col('date') <
+                                   pl.col('date_right'))))\
                          .rename({'used_files' : 'proj_to_delete'})\
                          .drop(['date'])\
                          .rename({'date_right': 'date'})\
@@ -213,10 +210,10 @@ def update_data_files():
         #   prev_used_files (.xlsx) & output_proj_files (.parquet)
         # remove the output .parquet file from output_proj_dir
         files_to_remove_list = \
-            pl.Series(used_df.filter(pl.col('proj_to_delete')
-                                    .is_not_null())\
-                            .select(pl.col('proj_to_delete')))\
-                            .to_list()
+            pl.Series(used_df.select(pl.col('proj_to_delete'))\
+                             .filter(pl.col('proj_to_delete')
+                                    .is_not_null()))\
+                             .to_list()
                             
         for file in files_to_remove_list:
             record_dict['prev_used_files'].remove(file)
@@ -245,7 +242,8 @@ def update_data_files():
     else:
         used_df = data_df
 
-    del data_df           
+    del data_df
+    gc.collect()           
     
     # add dates of projections and year_qtr to record_dict
     # https://www.rhosignal.com/posts/polars-nested-dtypes/   pl.list explanation
@@ -303,6 +301,7 @@ def update_data_files():
                         .map_batches(hp.date_to_year_qtr)
                         .alias(YR_QTR_NAME))
     del df
+    gc.collect()
         
 # margins
     margins_df = rd.margin_reader(latest_file_addr,
@@ -316,6 +315,7 @@ def update_data_files():
             on= YR_QTR_NAME,
             coalesce= True)
     del margins_df
+    gc.collect()
         
 # real interest rates, eoq, from FRED DFII10
     real_rt_df = rd.fred_reader(sp.INPUT_RR_ADDR,
@@ -328,6 +328,7 @@ def update_data_files():
             on=[YR_QTR_NAME],
             coalesce= True)
     del real_rt_df
+    gc.collect()
     
 # qtrly_data
     qtrly_df = rd.read_sp_sheet(latest_file_addr,
@@ -342,6 +343,7 @@ def update_data_files():
                                on= [YR_QTR_NAME],
                                coalesce= True)
     del qtrly_df
+    gc.collect()
     
 # +++++ update history file +++++++++++++++++++++++++++++++++++++++++++
     # move any existing hist file in output_dir to backup
@@ -366,9 +368,8 @@ def update_data_files():
     print('============================================\n')
     
     del actual_df
-    
+    gc.collect()
 
- 
 # +++++ update projection files +++++++++++++++++++++++++++++++++++++++
 # ordinarily a very short list
 # loop through files_to_read, fetch projections of earnings for each date
