@@ -6,17 +6,17 @@
    project directory: S&P500_PE/sp500_pe/__init__.py
 '''
 
-import sp500_pe as sp
-import sp500_pe.display_helper_func as dh
-import sp500_pe.plot_func as pf
-import sp500_pe.helper_func as hp
-
 import sys
-from pathlib import Path
+import gc
 
 import polars as pl
 import json
 import matplotlib.pyplot as plt
+
+import sp500_pe as sp
+import sp500_pe.display_helper_func as dh
+import sp500_pe.plot_func as pf
+import sp500_pe.helper_func as hp
 
 
 #=================  Global Parameters  ================================
@@ -113,8 +113,7 @@ def display_data():
         file_addr = sp.OUTPUT_PROJ_DIR / file_name
         if file_addr.exists():
             with file_addr.open('r') as f:
-                gf = pl.read_parquet(f)
-            proj_dict[yr_qtr] = gf
+                proj_dict[yr_qtr] = pl.read_parquet(f)
         else:
             print('\n============================================')
             print(f'No output file at \n{file_addr.name}')
@@ -182,6 +181,7 @@ def display_data():
     fig.savefig(str(sp.DISPLAY_0_ADDR))
     
     del df
+    gc.collect()
     
 # page one  ======================
 # shows:  historical 12m trailing pe plus
@@ -210,18 +210,6 @@ def display_data():
     
     # top panel
     df = data_df.select(['yr_qtr', '12m_op_eps', 'price'])
-    
-#=======================================================================================
-    
-    # I REMOVED PRICE FROM THE SELECT LIST BELOW, USE PRICE ONLY FROM DF
-    # TASK: REPLACE NULLS IN DF WITH EARN, IF NEC, FROM P_DF
-    #   1. extend df yr_qtr in df using p_df
-    #   2. extend fill 12m_eps in df with data from matching cols in p_df
-    #   3. add const price in df with latest obs in df
-    #   4. add indexed price in df with latest obs and ROG
-    #   5. add pe for both additions using extended 12m_eps
-    
-#=======================================================================================
                
     p_df = proj_dict[yr_qtr_current_projn]\
                 .select(['yr_qtr', '12m_op_eps'])
@@ -270,6 +258,7 @@ def display_data():
     fig.savefig(str(sp.DISPLAY_1_ADDR))
     
     del df
+    gc.collect()
     
 # page two  ======================
 # shows:  historical data for margins and 
@@ -332,7 +321,8 @@ def display_data():
     fig.savefig(str(sp.DISPLAY_2_ADDR))
     #plt.savefig(f'{output_dir}/eps_page2.pdf', bbox_inches='tight')
     
-    del(df)
+    del df
+    gc.collect()
     
 # page three  ======================
 # shows:  components of the equity premium,
@@ -391,6 +381,9 @@ def display_data():
     print('============================\n')
     fig.savefig(str(sp.DISPLAY_3_ADDR))
     #plt.savefig(f'{output_dir}/eps_page3.pdf', bbox_inches='tight')
+    
+    del df
+    gc.collect()
 
 
 if __name__ == '__main__':

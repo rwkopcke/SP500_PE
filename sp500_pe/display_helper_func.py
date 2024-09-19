@@ -1,7 +1,11 @@
-import polars as pl
-import sp500_pe.helper_func as hp
 from copy import deepcopy
+import gc
 import sys
+
+import polars as pl
+
+import sp500_pe.helper_func as hp
+
 
 '''
 def create_yq_str(dt_itrble):
@@ -37,6 +41,8 @@ def fwd_12m_ern(name, p_df):
     p_df = p_df.sort(by= 'yr_qtr')
     fwd_e = sum((p_df.item(id, name)
                  for id in range(4)))
+    del p_df
+    gc.collect()
     return fwd_e
 
 
@@ -107,6 +113,9 @@ def page0_df(df, p_dict, p_dict_columns, name_act):
                    on= 'yr_qtr',
                    how= 'left',
                    coalesce= True)
+    del hf
+    del pro_df
+    gc.collect()
     return p_df
 
 

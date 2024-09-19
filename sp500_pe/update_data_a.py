@@ -123,17 +123,11 @@ def update_data_files():
         print(f'No record dict file found at: \n{sp.RECORD_DICT_ADDR}')
         print(f'Initialized record_dict with no entries')
         print('============================================\n')
-        record_dict = {'sources': {'s&p': '',
-                                   'tips': ''},
-                       'latest_used_file': "",
-                       'proj_yr_qtrs' : [],
+        record_dict = {'prev_files': [],
                        'prev_used_files': [],
+                       'latest_used_file': "",
                        'output_proj_files': [],
-                       'prev_files': []}
-    
-    # ensure that recorded sources are current
-    record_dict['sources']['s&p'] = sp.SP_SOURCE
-    record_dict['sources']['tips'] = sp.REAL_RATE_SOURCE
+                       'proj_yr_qtrs' : []}
         
 # create list of earnings input files not previously seen
 # and add them to 'prev_files'
@@ -170,10 +164,10 @@ def update_data_files():
                             .alias('date'))\
                 .with_columns(pl.col('date')
                             .map_batches(hp.date_to_year_qtr)
-                            .alias('yr_qtr'))\
-                .group_by('yr_qtr')\
+                            .alias('year_qtr'))\
+                .group_by('year_qtr')\
                 .agg([pl.all().sort_by('date').last()])\
-                .sort(by= 'yr_qtr') 
+                .sort(by= 'year_qtr') 
     
     files_to_archive = list(new_files_set)
     del new_files_set
@@ -192,7 +186,7 @@ def update_data_files():
                             .alias('date'))\
                 .with_columns(pl.col('date')
                             .map_batches(hp.date_to_year_qtr)
-                            .alias('yr_qtr'))
+                            .alias('year_qtr'))
                 
     # update used_files, a join with new files
         # 1st filter removes yr_qtr rows that have no dates in data_df
@@ -200,7 +194,7 @@ def update_data_files():
     # after renaming, ensures that 'date' ref only files with new data
     # and proj_to_delete ref only files that are null or are superceded
         used_df = used_df.join(data_df,
-                               on= 'yr_qtr',
+                               on= 'year_qtr',
                                how= 'full',
                                coalesce= True)\
                          .filter(pl.col('date_right').is_not_null())\
@@ -210,7 +204,7 @@ def update_data_files():
                          .rename({'used_files' : 'proj_to_delete'})\
                          .drop(['date'])\
                          .rename({'date_right': 'date'})\
-                         .sort(by= 'yr_qtr')
+                         .sort(by= 'year_qtr')
                          
         # remove old files from record_dict lists
         #   prev_used_files (.xlsx) & output_proj_files (.parquet)
@@ -289,7 +283,7 @@ def update_data_files():
     df = rd.read_sp_sheet(latest_file_addr,
                           SHT_0_NAME,
                           **SHT_0_PARAMS)
-    
+
     # if any date is None, halt
     if (name_date is None or
         any([item is None
@@ -305,8 +299,7 @@ def update_data_files():
     actual_df = pl.concat([actual_df, df], how= "diagonal")\
                   .with_columns(pl.col('date')
                         .map_batches(hp.date_to_year_qtr)
-                        .alias(YR_QTR_NAME))   
-
+                        .alias(YR_QTR_NAME))
     del df
     gc.collect()
         
@@ -321,7 +314,6 @@ def update_data_files():
             how="left", 
             on= YR_QTR_NAME,
             coalesce= True)
-    
     del margins_df
     gc.collect()
         
@@ -335,7 +327,6 @@ def update_data_files():
             how="left", 
             on=[YR_QTR_NAME],
             coalesce= True)
-    
     del real_rt_df
     gc.collect()
     
@@ -353,52 +344,8 @@ def update_data_files():
                                coalesce= True)
     del qtrly_df
     gc.collect()
-
-# +++++ update projection files +++++++++++++++++++++++++++++++++++++++
-    # ordinarily a very short list
-    # loop through files_to_read, fetch projections of earnings for each date
-    failure_to_read_lst = []
-    for file in files_to_read_list:
-        # echo file name and address to console
-        input_address = sp.INPUT_DIR / file
-        print(f'\n input file: {file}')    
-        
-# projections of earnings
-        # read date of projection, no prices or other data
-        name_date, _ = \
-            rd.read_sp_date(input_address,
-                            SHT_0_NAME, **SHT_0_PROJ_DATE_PARAMS)
-        name_date = name_date.date()
     
-        # load projections for the date
-        proj_df = rd.read_sp_sheet(input_address,
-                                   SHT_0_NAME, **SHT_0_PROJ_PARAMS)\
-                    .with_columns(pl.col('date')
-                        .map_batches(hp.date_to_year_qtr)
-                        .alias(YR_QTR_NAME))
-
-        # if any date is None, abort and continue
-        if (name_date is None or
-            any([item is None
-                for item in proj_df['date']])):
-            print('\n============================================')
-            print('In main(), projections:')
-            print(f'Skipped sp-500 {name_date} missing projection date')
-            print('============================================\n')
-            failure_to_read_lst.append(file)
-            continue
-        
-# +++++ write proj_df file ++++++++++++++++++++++++++++++++++++++++++++
-        output_file_name = \
-            f'{PREFIX_OUTPUT_FILE_NAME} {name_date}{EXT_OUTPUT_FILE_NAME}'
-        record_dict['output_proj_files'].append(output_file_name)
-        output_file_address = sp.OUTPUT_PROJ_DIR / output_file_name
-        print(f'output file: {output_file_name}')
-        
-        with output_file_address.open('w') as f:
-            proj_df.write_parquet(f)
-            
-# +++++ write history file ++++++++++++++++++++++++++++++++++++++++++++
+# +++++ update history file +++++++++++++++++++++++++++++++++++++++++++
     # move any existing hist file in output_dir to backup
     if sp.OUTPUT_HIST_ADDR.exists():
         sp.OUTPUT_HIST_ADDR.rename(sp.BACKUP_HIST_ADDR)
@@ -419,8 +366,54 @@ def update_data_files():
     print('\n============================================')
     print(f'Wrote history file to: \n{sp.OUTPUT_HIST_ADDR}')
     print('============================================\n')
+    
+    del actual_df
+    gc.collect()
+
+# +++++ update projection files +++++++++++++++++++++++++++++++++++++++
+# ordinarily a very short list
+# loop through files_to_read, fetch projections of earnings for each date
+    failure_to_read_lst = []
+    for file in files_to_read_list:
+        # echo file name and address to console
+        input_address = sp.INPUT_DIR / file
+        print(f'\n input file: {file}')    
+        
+# projections of earnings
+        # read date of projection, no prices or other data
+        name_date, _ = \
+            rd.read_sp_date(input_address,
+                            SHT_0_NAME, **SHT_0_PROJ_DATE_PARAMS)
+        name_date = name_date.date()
+    
+        # load projections for the date
+        proj_df = rd.read_sp_sheet(input_address,
+                                   SHT_0_NAME, **SHT_0_PROJ_PARAMS)\
+                    .with_columns(pl.col('date')
+                        .map_batches(hp.date_to_year_qtr)
+                        .alias(YR_QTR_NAME))
+
+        # if any date is None, abort
+        if (name_date is None or
+            any([item is None
+                for item in proj_df['date']])):
+            print('\n============================================')
+            print('In main(), projections:')
+            print(f'Skipped sp-500 {name_date} missing projection date')
+            print('============================================\n')
+            failure_to_read_lst.append(file)
+            continue
+        
+        # if name_date is not None, write the df to file
+        output_file_name = \
+            f'{PREFIX_OUTPUT_FILE_NAME} {name_date}{EXT_OUTPUT_FILE_NAME}'
+        record_dict['output_proj_files'].append(output_file_name)
+        output_file_address = sp.OUTPUT_PROJ_DIR / output_file_name
+        print(f'output file: {output_file_name}')
+        with output_file_address.open('w') as f:
+            proj_df.write_parquet(f)
             
-# +++++ update archive ++++++++++++++++++++++++++++++++++++++++
+    # +++++ update archive ++++++++++++++++++++++++++++++++++++++++
     # archive all input files -- uses Path() variables
     # https://sysadminsage.com/python-move-file-to-another-directory/
     print('\n============================================')

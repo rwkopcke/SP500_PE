@@ -6,13 +6,14 @@
         import sp500_pe.read_data_func as rd
 '''
 
-from openpyxl import load_workbook
-import polars as pl
-from datetime import datetime
-import polars.selectors as cs
-import openpyxl.utils.cell
-import sp500_pe.helper_func as hp
 import sys
+
+from openpyxl import load_workbook
+import openpyxl.utils.cell
+import polars as pl
+import polars.selectors as cs
+
+import sp500_pe.helper_func as hp
 
 
 def read_sp_date(file_addr, wksht_name,
@@ -31,7 +32,6 @@ def read_sp_date(file_addr, wksht_name,
     wksht = hp.find_wksht(file_addr, wksht_name)
     
     # fetch row for latest date and price
-
     key_row = hp.find_key_row(wksht, 'A', 1, date_keys)
 
     if (key_row == 0):
@@ -200,5 +200,8 @@ def fred_reader(file_addr, rr_col_name, yr_qtr_name):
                         .alias(yr_qtr_name))\
            .cast({pl.Datetime: pl.Date,
                   cs.float(): pl.Float32})\
+           .group_by('yr_qtr')\
+           .agg([pl.all().sort_by('date').last()])\
+           .sort(by= 'yr_qtr')\
            .drop('date')
     return df

@@ -7,9 +7,6 @@
     access these values in other modules by
         import sp500_pe as sp
         sp.INPUT_DIR
-
-    permits reinitializing the entire project
-    as discussed in the ARCHIVE address block
 '''
 
 from pathlib import Path
@@ -38,10 +35,13 @@ ARCHIVE_DIR = \
    Path('/Users/richardkopcke/Dropbox/Stock Analysis/sp_data_archive')
 # do the following only to reinitialize the projects' data files
 # from the archived source .xlsx files:
-# make sure that DFII10.xlsx is in archive_dir
+# make sure that make sure that DFII10.xlsx is in archive_dir
+
 # to reinitialize, uncomment:
+# ==========================================
 #INPUT_DIR = ARCHIVE_DIR
 #INPUT_RR_ADDR = ARCHIVE_DIR / INPUT_RR_FILE
+# ==========================================
 # after reinitializing, recomment these lines
 
 OUTPUT_DIR = BASE_DIR / "output_dir"

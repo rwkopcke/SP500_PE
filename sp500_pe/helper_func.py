@@ -6,11 +6,11 @@
         import sp500_pe.helper_func as hp
 '''
 
-from openpyxl import load_workbook
-import polars as pl
 from datetime import datetime
+
+from openpyxl import load_workbook
 import openpyxl.utils.cell
-import sys
+import polars as pl
 
 
 def my_df_print(df):                                
